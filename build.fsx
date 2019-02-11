@@ -18,9 +18,6 @@ let summary = "Silly NuGet package"
 let nugetProject = "src" </> "MyFsNuget" </> "MyFsNuget.fsproj"
 let solutionFile = "MyNuget.sln"
 
-let srcGlob = "src/**/*.?sproj"
-let testsGlob = "tests/**/*.?sproj"
-
 Target.create "Clean" (fun _ -> !!"./**/bin/" ++ "./**/obj/" |> Shell.cleanDirs)
 Target.create "Build" (fun _ -> DotNet.build id solutionFile)
 Target.create "Test" (fun _ -> DotNet.test id solutionFile)
@@ -60,7 +57,9 @@ let createAssemblyInfoTarget (semverInfo : SemVerInfo) =
             | Csproj -> AssemblyInfoFile.createCSharp ((folderName </> "Properties") </> "AssemblyInfo.cs") attributes)
     )
 
-let createPackTarget (semVerInfo : SemVerInfo) (project : string)=
+/// Pass a single project to pack only that one.
+/// Pass the .sln to pack all non-test projects.
+let createPackTarget (semVerInfo : SemVerInfo) (projectOrSln : string)=
     Target.create "Pack" (fun _ ->
 
         // MsBuild uses ; and , as properties separator in the cli
@@ -78,7 +77,7 @@ let createPackTarget (semVerInfo : SemVerInfo) (project : string)=
             { p with
                 Configuration = DotNet.BuildConfiguration.Release
                 Common = DotNet.Options.withCustomParams (Some customParams) p.Common })
-            project)
+            projectOrSln)
 
 Target.create "Push" (fun _ ->
     let nugetServer = Environment.environVarOrFail "NUGET_WRITE_URL"
@@ -87,8 +86,8 @@ Target.create "Push" (fun _ ->
     let result =
         !!"**/Release/*.nupkg"
         |> Seq.map (fun nupkg ->
-             Trace.trace (sprintf "Publishing nuget package: %s" nupkg)
-             nupkg, DotNet.exec id "nuget" (sprintf "push %s --source %s --api-key %s" nupkg nugetServer apiKey))
+            Trace.trace (sprintf "Publishing nuget package: %s" nupkg)
+            (nupkg, DotNet.exec id "nuget" (sprintf "push %s --source %s --api-key %s" nupkg nugetServer apiKey)))
         |> Seq.filter (fun (_, p) -> p.ExitCode <> 0)
         |> List.ofSeq
         
