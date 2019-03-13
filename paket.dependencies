@@ -15,4 +15,5 @@ group Build
   nuget Fake.DotNet.AssemblyInfoFile
   nuget Fake.DotNet.Cli
   nuget Fake.IO.FileSystem
+  nuget Microsoft.SourceLink.GitHub
 

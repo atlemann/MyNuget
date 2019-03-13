@@ -1,0 +1,2 @@
+group Build
+Microsoft.SourceLink.GitHub copy_local:true
