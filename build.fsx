@@ -19,64 +19,39 @@ let nugetProject = "src" </> "MyFsNuget" </> "MyFsNuget.fsproj"
 let solutionFile = "MyNuget.sln"
 
 Target.create "Clean" (fun _ -> !!"./**/bin/" ++ "./**/obj/" |> Shell.cleanDirs)
-Target.create "Build" (fun _ -> DotNet.build id solutionFile)
 Target.create "Test" (fun _ -> DotNet.test id solutionFile)
 
-let createAssemblyInfoTarget (semverInfo : SemVerInfo) =
+let createBuildTarget (semverInfo : SemVerInfo option) =
+    Target.create "Build" (fun _ ->
 
-    let assemblyVersion =
-        sprintf "%d.%d.%d" semverInfo.Major semverInfo.Minor semverInfo.Patch
+        let customParams =
+            [ yield ("Product", product)
+              yield ("Authors", author)
+              yield ("Owners", author)
+              yield ("Description", summary)
+              if semverInfo.IsSome then
+                yield ("Version", semverInfo.Value.ToString()) ]
 
-    let toAssemblyInfoAttributes projectName =
-        [ AssemblyInfo.Title projectName
-          AssemblyInfo.Product product
-          AssemblyInfo.Description summary
-          AssemblyInfo.Version assemblyVersion
-          AssemblyInfo.FileVersion assemblyVersion ]
-
-    // Helper active pattern for project types
-    let (|Fsproj|Csproj|) (projFileName:string) =
-        match projFileName with
-        | f when f.EndsWith("fsproj") -> Fsproj
-        | f when f.EndsWith("csproj") -> Csproj
-        | _                           -> failwith (sprintf "Project file %s not supported. Unknown project type." projFileName)
-
-    // Generate assembly info files with the right version & up-to-date information
-    Target.create "AssemblyInfo" (fun _ ->
-        let getProjectDetails projectPath =
-            let projectName = System.IO.Path.GetFileNameWithoutExtension projectPath
-            let directoryName = System.IO.Path.GetDirectoryName projectPath
-            let assemblyInfo = projectName |> toAssemblyInfoAttributes
-            (projectPath, directoryName, assemblyInfo)
-
-        !! "src/**/*.??proj"
-        |> Seq.map getProjectDetails
-        |> Seq.iter (fun (projFileName, folderName, attributes) ->
-            match projFileName with
-            | Fsproj -> AssemblyInfoFile.createFSharp (folderName </> "AssemblyInfo.fs") attributes
-            | Csproj -> AssemblyInfoFile.createCSharp ((folderName </> "Properties") </> "AssemblyInfo.cs") attributes)
-    )
+        DotNet.build (fun p ->
+            { p with MSBuildParams = { p.MSBuildParams with Properties = customParams }})
+            solutionFile)
 
 /// Pass a single project to pack only that one.
 /// Pass the .sln to pack all non-test projects.
 let createPackTarget (semVerInfo : SemVerInfo) (projectOrSln : string)=
     Target.create "Pack" (fun _ ->
 
-        // MsBuild uses ; and , as properties separator in the cli
-        let escapeCommas (input : string) =
-            input.Replace(",", "%2C")
-
         let customParams =
-            [ (sprintf "/p:Authors=\"%s\"" author)
-              (sprintf "/p:Owners=\"%s\"" author)
-              (sprintf "/p:PackageVersion=\"%s\"" (semVerInfo.ToString()))
-              (sprintf "/p:Description=\"%s\"" summary |> escapeCommas) ]
-            |> String.concat " "
+            [ ("Product", product)
+              ("Authors", author)
+              ("Owners", author)
+              ("Description", summary)
+              ("Version", semVerInfo.ToString()) ]
 
         DotNet.pack (fun p ->
             { p with
                 Configuration = DotNet.BuildConfiguration.Release
-                Common = DotNet.Options.withCustomParams (Some customParams) p.Common })
+                MSBuildParams = { p.MSBuildParams with Properties = customParams }})
             projectOrSln)
 
 Target.create "Push" (fun _ ->
@@ -108,27 +83,28 @@ let (|Release|CI|) input =
     else
         CI
 
-let branchName = Environment.environVarOrDefault "BRANCH_NAME" ""
+let branchName = Environment.environVarOrDefault "BRANCH_NAME" "1.2.3"
 
 open Fake.Core.TargetOperators
 
 let buildTarget =
     match branchName with
     | Release version ->
-        createAssemblyInfoTarget version
+        createBuildTarget (Some version)
         createPackTarget version nugetProject
         Target.create "Release" ignore
 
         "Clean"
-        ==> "AssemblyInfo"
         ==> "Build"
-        ==> "Test"
+//        ==> "Test"
         ==> "Pack"
-        ==> "Push"
+//        ==> "Push"
         ==> "Release"
 
     | CI ->
         Target.create "CI" ignore
+        
+        createBuildTarget None
 
         "Clean"
         ==> "Build"
